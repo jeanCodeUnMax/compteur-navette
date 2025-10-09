@@ -1,356 +1,457 @@
 // ==========================================
 // VLX COMPTAGES - Application de comptage transport
-// Version: 1.0.0 - DEBUGGÉE ET TESTÉE
+// Version: 1.3.0 - avec support Web et Mobile
 // Ligne Denain - Espace Villars
 // ==========================================
 
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  TextInput, 
-  StyleSheet, 
-  Alert, 
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  StyleSheet,
+  Alert,
   ScrollView,
-  StatusBar
+  StatusBar,
+  Platform
 } from 'react-native';
 import * as SQLite from 'expo-sqlite';
+// Utiliser l'API legacy pour éviter les erreurs
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 // ==========================================
-// CONFIGURATION
+// EXPORTS - API Legacy corrigée
+// ==========================================
+const exporterBaseDeDonnees = async () => {
+  if (!db) {
+    Alert.alert('Info', 'Mode Web - Export SQLite non disponible');
+    return;
+  }
+  try {
+    // Utiliser FileSystem.documentDirectory au lieu de Paths
+    const dbPath = `${FileSystem.documentDirectory}SQLite/${DB_NAME}`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const exportPath = `${FileSystem.cacheDirectory}comptages_${timestamp}.db`;
+    
+    // Vérifier si le fichier existe
+    const fileInfo = await FileSystem.getInfoAsync(dbPath);
+    if (!fileInfo.exists) {
+      Alert.alert('Erreur', 'Fichier base de données introuvable');
+      return;
+    }
+    
+    await FileSystem.copyAsync({ from: dbPath, to: exportPath });
+    
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(exportPath, {
+        mimeType: 'application/x-sqlite3',
+        dialogTitle: 'Exporter SQLite'
+      });
+      Alert.alert('Succès', 'Base exportée');
+    } else {
+      Alert.alert('Info', 'Partage non disponible');
+    }
+  } catch (err) {
+    console.error('Erreur export DB:', err);
+    Alert.alert('Erreur', `Export échoué: ${err.message}`);
+  }
+};
+
+const exporterJSON = async () => {
+  try {
+    let data: any[] = [];
+    
+    // Collecter les données
+    if (Platform.OS === 'web') {
+      data = Array.from(memDB.entries()).map(([key, value]) => ({
+        tour: parseInt(key.split('-')[0]),
+        arretIndex: parseInt(key.split('-')[1]),
+        arretNom: value.arretNom || ARRETS_BOUCLE[parseInt(key.split('-')[1])],
+        montees: value.montees,
+        descentes: value.descentes,
+        dateHeure: value.dateHeure || new Date().toISOString(),
+      }));
+    } else if (db) {
+      try {
+        const st = db.prepareSync('SELECT * FROM comptages ORDER BY tour, arretIndex');
+        const res = st.executeSync();
+        data = res.getAllSync();
+        st.finalizeSync();
+      } catch (dbError) {
+        console.warn('Erreur SQLite, utilisation données mémoire:', dbError);
+        data = Array.from(memDB.entries()).map(([key, value]) => ({
+          tour: parseInt(key.split('-')[0]),
+          arretIndex: parseInt(key.split('-')[1]),
+          arretNom: value.arretNom || ARRETS_BOUCLE[parseInt(key.split('-')[1])],
+          montees: value.montees,
+          descentes: value.descentes,
+          dateHeure: value.dateHeure || new Date().toISOString(),
+        }));
+      }
+    } else {
+      data = Array.from(memDB.entries()).map(([key, value]) => ({
+        tour: parseInt(key.split('-')[0]),
+        arretIndex: parseInt(key.split('-')[1]),
+        arretNom: value.arretNom || ARRETS_BOUCLE[parseInt(key.split('-')[1])],
+        montees: value.montees,
+        descentes: value.descentes,
+        dateHeure: value.dateHeure || new Date().toISOString(),
+      }));
+    }
+    
+    if (data.length === 0) {
+      Alert.alert('Info', 'Aucune donnée à exporter');
+      return;
+    }
+    
+    const json = {
+      meta: { 
+        export: new Date().toISOString(), 
+        total: data.length,
+        platform: Platform.OS 
+      },
+      comptages: data,
+    };
+    
+    const fileName = `comptages_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)}.json`;
+    const path = `${FileSystem.cacheDirectory}${fileName}`;
+    
+    await FileSystem.writeAsStringAsync(path, JSON.stringify(json, null, 2), { encoding: 'utf8' });
+    
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(path, { 
+        mimeType: 'application/json', 
+        dialogTitle: 'Exporter JSON'
+      });
+      Alert.alert('Succès', 'JSON exporté');
+    } else {
+      Alert.alert('Info', 'Partage non disponible');
+    }
+  } catch (e) {
+    console.error('Erreur JSON:', e);
+    Alert.alert('Erreur', `Export JSON échoué: ${e.message}`);
+  }
+};
+
+const exporterCSV = async () => {
+  try {
+    let data: any[] = [];
+    
+    // Collecter les données
+    if (Platform.OS === 'web') {
+      data = Array.from(memDB.entries()).map(([key, value]) => ({
+        tour: parseInt(key.split('-')[0]),
+        arretIndex: parseInt(key.split('-')[1]),
+        arretNom: value.arretNom || ARRETS_BOUCLE[parseInt(key.split('-')[1])],
+        montees: value.montees,
+        descentes: value.descentes,
+        dateHeure: value.dateHeure || new Date().toISOString(),
+      }));
+    } else if (db) {
+      try {
+        const st = db.prepareSync('SELECT * FROM comptages ORDER BY tour, arretIndex');
+        const res = st.executeSync();
+        data = res.getAllSync();
+        st.finalizeSync();
+      } catch (dbError) {
+        console.warn('Erreur SQLite, utilisation données mémoire:', dbError);
+        data = Array.from(memDB.entries()).map(([key, value]) => ({
+          tour: parseInt(key.split('-')[0]),
+          arretIndex: parseInt(key.split('-')[1]),
+          arretNom: value.arretNom || ARRETS_BOUCLE[parseInt(key.split('-')[1])],
+          montees: value.montees,
+          descentes: value.descentes,
+          dateHeure: value.dateHeure || new Date().toISOString(),
+        }));
+      }
+    } else {
+      data = Array.from(memDB.entries()).map(([key, value]) => ({
+        tour: parseInt(key.split('-')[0]),
+        arretIndex: parseInt(key.split('-')[1]),
+        arretNom: value.arretNom || ARRETS_BOUCLE[parseInt(key.split('-')[1])],
+        montees: value.montees,
+        descentes: value.descentes,
+        dateHeure: value.dateHeure || new Date().toISOString(),
+      }));
+    }
+    
+    if (data.length === 0) {
+      Alert.alert('Info', 'Aucune donnée à exporter');
+      return;
+    }
+    
+    const csv = [
+      'Tour,Arrêt,Nom Arrêt,Montées,Descentes,Date/Heure',
+      ...data.map(c => `${c.tour},${c.arretIndex},"${c.arretNom}",${c.montees},${c.descentes},"${c.dateHeure}"`)
+    ].join('\n');
+    
+    const fileName = `comptages_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)}.csv`;
+    const path = `${FileSystem.cacheDirectory}${fileName}`;
+    
+    await FileSystem.writeAsStringAsync(path, csv, { encoding: 'utf8' });
+    
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(path, { 
+        mimeType: 'text/csv', 
+        dialogTitle: 'Exporter CSV'
+      });
+      Alert.alert('Succès', 'CSV exporté');
+    } else {
+      Alert.alert('Info', 'Partage non disponible');
+    }
+  } catch (e) {
+    console.error('Erreur CSV:', e);
+    Alert.alert('Erreur', `Export CSV échoué: ${e.message}`);
+  }
+};
+
+// ==========================================
+// LISTE DES ARRÊTS (à l'intérieur d'Espace Villars)
 // ==========================================
 const ARRETS_BOUCLE = [
-  "ESPACE VILLARS",
-  "TRARIEUX",
-  "LYCEES KASTLER",
-  "RUE D'HAVELUY",
-  "DENAIN HOPITAL",
-  "JAURES",
-  "GARE DU NORD",
-  "COLLEGE BAYARD",
-  "TURENNE",
-  "PLACE GAMBETTA",
-  "MOUSSERON",
-  "PLACE BAUDIN",
-  "ETS DES FORGES",
-  "PARC ZOLA",
-  "PISCINE",
-  "PONT DE L'ENCLOS",
-  "PARC D'ACTIVITES",
-  "PARC LEBRET",
-  "ESPACE VILLARS"
+  'ESPACE VILLARS', 'TRARIEUX', 'LYCEES KASTLER', "RUE D'HAVELUY", 'DENAIN HOPITAL',
+  'JAURES', 'GARE DU NORD', 'COLLEGE BAYARD', 'TURENNE', 'PLACE GAMBETTA',
+  'MOUSSERON', 'PLACE BAUDIN', 'ETS DES FORGES', 'PARC ZOLA', 'PISCINE',
+  "PONT DE L'ENCLOS", "PARC D'ACTIVITES", 'PARC LEBRET', 'ESPACE VILLARS'
 ];
 
-const NOMBRE_TOURS = 13;
+// ==========================================
+// MOCK HORAIRES (13 tours entrants/sortants d'Espace Villars)
+// ==========================================
+const MOCK_HORAIRES_VLX = [
+  {
+    tour: 1,
+    depart: "Lille Flandres",
+    HD: "07:35",
+    arrivee: "Valenciennes",
+    HA: "08:10",
+    arrets: ["Lille Flandres", "Valenciennes"],
+  },
+  {
+    tour: 2,
+    depart: "Valenciennes",
+    HD: "08:20",
+    arrivee: "ESPACE VILLARS",
+    HA: "08:49",
+    arrets: ARRETS_BOUCLE,
+  },
+  // Génération des tours 3 à 13 (11 tours restants)
+  ...Array.from({ length: 11 }, (_, i) => ({
+    tour: i + 3,
+    depart: "ESPACE VILLARS",
+    HD: `${9 + i}:${i === 0 ? '00' : i === 1 ? '45' : i === 2 ? '30' : i === 3 ? '15' : i === 4 ? '00' : i === 5 ? '45' : i === 6 ? '30' : i === 7 ? '15' : i === 8 ? '00' : i === 9 ? '45' : '30'}`,
+    arrivee: "ESPACE VILLARS",
+    HA: `${9 + i}:${i === 0 ? '37' : i === 1 ? '22' : i === 2 ? '07' : i === 3 ? '52' : i === 4 ? '37' : i === 5 ? '22' : i === 6 ? '07' : i === 7 ? '52' : i === 8 ? '37' : i === 9 ? '22' : '07'}`,
+    arrets: ARRETS_BOUCLE,
+  })),
+  {
+    tour: 14,
+    depart: "ESPACE VILLARS",
+    HD: "18:43",
+    arrivee: "Valenciennes",
+    HA: "19:13",
+    arrets: ["ESPACE VILLARS", "Valenciennes"],
+  },
+  {
+    tour: 15,
+    depart: "Valenciennes",
+    HD: "19:20",
+    arrivee: "Lille Flandres",
+    HA: "19:55",
+    arrets: ["Valenciennes", "Lille Flandres"],
+  }
+];
+
+const NOMBRE_TOURS = MOCK_HORAIRES_VLX.length;
 const DB_NAME = 'comptages.db';
 
 // ==========================================
-// DATABASE INITIALIZATION
+// INTERFACE
+// ==========================================
+interface Comptage {
+  id?: number;
+  tour: number;
+  arretIndex: number;
+  arretNom: string;
+  montees: number;
+  descentes: number;
+  dateHeure: string;
+}
+
+// ==========================================
+// BASE DE DONNÉES
 // ==========================================
 let db: SQLite.SQLiteDatabase | null = null;
+const memDB = new Map<string, any>();
 
 const initDatabase = (): boolean => {
+  if (Platform.OS === 'web') {
+    console.log('🧠 Mode WEB : base en mémoire');
+    return true;
+  }
   try {
     db = SQLite.openDatabaseSync(DB_NAME);
-    
-    // Supprimer ancienne table (DEV ONLY)
-    db.execSync('DROP TABLE IF EXISTS comptages');
-    
-    // Créer table avec bon schéma
     db.execSync(`
       CREATE TABLE IF NOT EXISTS comptages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tour INTEGER NOT NULL,
-        arretIndex INTEGER NOT NULL,
-        arretNom TEXT NOT NULL,
-        montees INTEGER DEFAULT 0,
-        descentes INTEGER DEFAULT 0,
-        dateHeure TEXT NOT NULL,
-        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        tour INTEGER,
+        arretIndex INTEGER,
+        arretNom TEXT,
+        montees INTEGER,
+        descentes INTEGER,
+        dateHeure TEXT
       );
-
-      CREATE INDEX IF NOT EXISTS idx_tour ON comptages(tour);
-      CREATE INDEX IF NOT EXISTS idx_arret ON comptages(arretIndex);
     `);
-    
-    console.log('✓ Base de données OK');
     return true;
-  } catch (error) {
-    console.error('✗ Erreur DB:', error);
-    Alert.alert('Erreur', 'Impossible d\'initialiser la base de données');
+  } catch (err) {
+    console.error('Erreur DB init:', err);
     return false;
   }
 };
 
 // ==========================================
-// MAIN COMPONENT
+// EXPORTS - Fonctions déjà définies plus haut
 // ==========================================
+// Les fonctions exporterBaseDeDonnees, exporterJSON et exporterCSV
+// sont déjà définies dans la section précédente du fichier
 export default function App() {
-  const [isDbReady, setIsDbReady] = useState(false);
+  // États
   const [currentTour, setCurrentTour] = useState(1);
   const [currentArret, setCurrentArret] = useState(0);
   const [montees, setMontees] = useState(0);
   const [descentes, setDescentes] = useState(0);
-  const [totalComptages, setTotalComptages] = useState(0);
+  const [isDbReady, setIsDbReady] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   useEffect(() => {
-    const setup = () => {
-      const success = initDatabase();
-      setIsDbReady(success);
-      if (success) chargerStatistiques();
-    };
-    setup();
+    setIsDbReady(initDatabase());
   }, []);
-
-  // ==========================================
-  // DATABASE OPERATIONS
-  // ==========================================
-  const chargerStatistiques = () => {
-    if (!db) return;
-    try {
-      const statement = db.prepareSync('SELECT COUNT(*) as total FROM comptages');
-      const result = statement.executeSync();
-      const row = result.getFirstSync() as { total: number };
-      statement.finalizeSync();
-      setTotalComptages(row.total);
-    } catch (error) {
-      console.error('Erreur stats:', error);
-    }
+  
+   // Fonction pour changer le mode sombre
+  const toggleDarkMode = () => {
+    setIsDarkMode((prev) => !prev);
   };
 
-  const sauvegarderComptage = (): boolean => {
-    if (!db) {
-      Alert.alert('Erreur', 'Base non initialisée');
-      return false;
-    }
+  
 
-    try {
-      const dateHeure = new Date().toISOString();
-      const statement = db.prepareSync(
-        'INSERT INTO comptages (tour, arretIndex, arretNom, montees, descentes, dateHeure) VALUES (?, ?, ?, ?, ?, ?)'
-      );
-      statement.executeSync(currentTour, currentArret, ARRETS_BOUCLE[currentArret], montees, descentes, dateHeure);
-      statement.finalizeSync();
-      
-      console.log(`✓ Sauvegardé T${currentTour} A${currentArret} M:${montees} D:${descentes}`);
-      chargerStatistiques();
-      return true;
-    } catch (error) {
-      console.error('Erreur sauvegarde:', error);
-      Alert.alert('Erreur', 'Sauvegarde échouée');
-      return false;
-    }
-  };
-
-  // ==========================================
-  // NAVIGATION
-  // ==========================================
   const allerArretSuivant = () => {
-    if (!sauvegarderComptage()) return;
+    const infosTour = MOCK_HORAIRES_VLX[currentTour - 1];
+    
+    // Sauvegarder les comptages actuels
+    const key = `${currentTour}-${currentArret}`;
+    const comptage = {
+      tour: currentTour,
+      arretIndex: currentArret,
+      arretNom: infosTour.arrets[currentArret],
+      montees: montees,
+      descentes: descentes,
+      dateHeure: new Date().toISOString()
+    };
 
-    let nouveauTour = currentTour;
-    let nouvelArret = currentArret + 1;
-
-    if (nouvelArret >= ARRETS_BOUCLE.length) {
-      nouveauTour++;
-      nouvelArret = 0;
-
-      if (nouveauTour > NOMBRE_TOURS) {
-        Alert.alert('🎉 Terminé', `Les ${NOMBRE_TOURS} tours sont complétés !`);
-        return;
+    if (Platform.OS === 'web') {
+      memDB.set(key, comptage);
+    } else if (db) {
+      try {
+        const stmt = db.prepareSync('INSERT INTO comptages (tour, arretIndex, arretNom, montees, descentes, dateHeure) VALUES (?, ?, ?, ?, ?, ?)');
+        stmt.executeSync([currentTour, currentArret, infosTour.arrets[currentArret], montees, descentes, new Date().toISOString()]);
+        stmt.finalizeSync();
+      } catch (err) {
+        console.error('Erreur sauvegarde:', err);
+        memDB.set(key, comptage);
       }
+    } else {
+      memDB.set(key, comptage);
     }
 
-    setCurrentTour(nouveauTour);
-    setCurrentArret(nouvelArret);
+    // Réinitialiser les compteurs
     setMontees(0);
     setDescentes(0);
+
+    // Passer à l'arrêt suivant
+    if (currentArret < infosTour.arrets.length - 1) {
+      setCurrentArret(currentArret + 1);
+    } else {
+      // Passer au tour suivant
+      if (currentTour < NOMBRE_TOURS) {
+        setCurrentTour(currentTour + 1);
+        setCurrentArret(0);
+      } else {
+        Alert.alert('Terminé', 'Tous les tours sont complétés!');
+      }
+    }
   };
 
   const allerArretPrecedent = () => {
-    if (currentArret === 0 && currentTour === 1) return;
-    if (!sauvegarderComptage()) return;
-
-    let nouveauTour = currentTour;
-    let nouvelArret = currentArret - 1;
-
-    if (nouvelArret < 0) {
-      nouveauTour--;
-      nouvelArret = ARRETS_BOUCLE.length - 1;
+    if (currentArret > 0) {
+      setCurrentArret(currentArret - 1);
+    } else if (currentTour > 1) {
+      const tourPrecedent = currentTour - 1;
+      const infosTourPrecedent = MOCK_HORAIRES_VLX[tourPrecedent - 1];
+      setCurrentTour(tourPrecedent);
+      setCurrentArret(infosTourPrecedent.arrets.length - 1);
     }
 
-    setCurrentTour(nouveauTour);
-    setCurrentArret(nouvelArret);
-    setMontees(0);
-    setDescentes(0);
-  };
-
-  const reinitialiserComptages = () => {
-    Alert.alert(
-      '⚠️ Confirmation',
-      'Supprimer toutes les données ?',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Supprimer',
-          style: 'destructive',
-          onPress: () => {
-            if (!db) return;
-            try {
-              db.execSync('DELETE FROM comptages');
-              setCurrentTour(1);
-              setCurrentArret(0);
-              setMontees(0);
-              setDescentes(0);
-              chargerStatistiques();
-              Alert.alert('✓', 'Données supprimées');
-            } catch (error) {
-              Alert.alert('Erreur', 'Échec suppression');
-            }
-          }
-        }
-      ]
-    );
-  };
-
-  // ==========================================
-  // EXPORTS
-  // ==========================================
-  const exporterBaseDeDonnees = async () => {
-    if (!db) return;
-
-    try {
-      const statement = db.prepareSync('SELECT COUNT(*) as count FROM comptages');
-      const result = statement.executeSync();
-      const row = result.getFirstSync() as { count: number };
-      statement.finalizeSync();
-
-      if (row.count === 0) {
-        Alert.alert('Info', 'Aucune donnée à exporter');
-        return;
-      }
-
-      const dbPath = `${FileSystem.documentDirectory}SQLite/${DB_NAME}`;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      const exportPath = `${FileSystem.documentDirectory}comptages_${timestamp}.db`;
-
-      const dbInfo = await FileSystem.getInfoAsync(dbPath);
-      if (!dbInfo.exists) {
-        Alert.alert('Erreur', 'Base introuvable');
-        return;
-      }
-
-      await FileSystem.copyAsync({ from: dbPath, to: exportPath });
-
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(exportPath, {
-          mimeType: 'application/x-sqlite3',
-          dialogTitle: 'Exporter SQLite'
-        });
-        Alert.alert('✓ Succès', `${row.count} comptages exportés`);
-      }
-    } catch (error: any) {
-      console.error('Erreur export SQLite:', error);
-      Alert.alert('Erreur', error.message);
+    // Charger les données précédentes si elles existent
+    const key = `${currentTour}-${currentArret}`;
+    const data = memDB.get(key);
+    if (data) {
+      setMontees(data.montees || 0);
+      setDescentes(data.descentes || 0);
+    } else {
+      setMontees(0);
+      setDescentes(0);
     }
   };
 
-  const exporterJSON = async () => {
-    if (!db) return;
+  // STYLES DYNAMIQUES
+  const dynamicStyles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: isDarkMode ? '#121212' : '#f5f5f5',
+    },
+    infoBox: {
+      backgroundColor: isDarkMode ? '#1E1E1E' : '#fff',
+      margin: 15,
+      padding: 15,
+      borderRadius: 10,
+    },
+    horairesBox: {
+      backgroundColor: isDarkMode ? '#1E1E1E' : '#fff',
+      margin: 15,
+      padding: 15,
+      borderRadius: 10,
+    },
+    arretBox: {
+      backgroundColor: isDarkMode ? '#2E7D32' : '#4CAF50',
+      margin: 15,
+      padding: 25,
+      borderRadius: 12,
+      alignItems: 'center',
+    },
+    compteurSection: {
+      backgroundColor: isDarkMode ? '#1E1E1E' : '#fff',
+      margin: 15,
+      padding: 20,
+      borderRadius: 10,
+    },
+    text: {
+      color: isDarkMode ? '#fff' : '#333',
+    },
+    textSecondary: {
+      color: isDarkMode ? '#ccc' : '#666',
+    },
+  });
 
-    try {
-      const statement = db.prepareSync('SELECT * FROM comptages ORDER BY tour, arretIndex');
-      const result = statement.executeSync();
-      const comptages = result.getAllSync();
-      statement.finalizeSync();
+  // CALCULS
+  const infosTour = MOCK_HORAIRES_VLX[currentTour - 1];
+  const progression = (
+    ((currentTour - 1) * infosTour.arrets.length + currentArret) /
+    (NOMBRE_TOURS * infosTour.arrets.length) * 100
+  );
 
-      if (comptages.length === 0) {
-        Alert.alert('Info', 'Aucune donnée');
-        return;
-      }
-
-      const data = {
-        metadata: {
-          exportDate: new Date().toISOString(),
-          application: 'VLX Comptages',
-          ligne: 'Denain - Espace Villars'
-        },
-        summary: {
-          totalComptages: comptages.length,
-          totalMontees: comptages.reduce((s: number, c: any) => s + c.montees, 0),
-          totalDescentes: comptages.reduce((s: number, c: any) => s + c.descentes, 0)
-        },
-        comptages
-      };
-
-      const filename = `comptages_${new Date().toISOString().split('T')[0]}.json`;
-      const filepath = `${FileSystem.documentDirectory}${filename}`;
-
-      await FileSystem.writeAsStringAsync(filepath, JSON.stringify(data, null, 2), { encoding: FileSystem.EncodingType.UTF8 });
-
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(filepath, {
-          mimeType: 'application/json',
-          dialogTitle: 'Exporter JSON'
-        });
-        Alert.alert('✓ Succès', 'JSON exporté');
-      }
-    } catch (error: any) {
-      console.error('Erreur JSON:', error);
-      Alert.alert('Erreur', error.message);
-    }
-  };
-
-  const exporterCSV = async () => {
-    if (!db) return;
-
-    try {
-      const statement = db.prepareSync('SELECT * FROM comptages ORDER BY tour, arretIndex');
-      const result = statement.executeSync();
-      const comptages = result.getAllSync();
-      statement.finalizeSync();
-
-      if (comptages.length === 0) {
-        Alert.alert('Info', 'Aucune donnée');
-        return;
-      }
-
-      const csv = [
-        'Tour,Arrêt Index,Nom Arrêt,Montées,Descentes,Date Heure',
-        ...comptages.map((c: any) =>
-          `${c.tour},${c.arretIndex},"${c.arretNom}",${c.montees},${c.descentes},"${c.dateHeure}"`
-        )
-      ].join('\n');
-
-      const filename = `comptages_${new Date().toISOString().split('T')[0]}.csv`;
-      const filepath = `${FileSystem.documentDirectory}${filename}`;
-
-      await FileSystem.writeAsStringAsync(filepath, csv, { encoding: FileSystem.EncodingType.UTF8 });
-
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(filepath, {
-          mimeType: 'text/csv',
-          dialogTitle: 'Exporter CSV'
-        });
-        Alert.alert('✓ Succès', 'CSV exporté');
-      }
-    } catch (error: any) {
-      console.error('Erreur CSV:', error);
-      Alert.alert('Erreur', error.message);
-    }
-  };
-
-  // ==========================================
   // RENDER
-  // ==========================================
-  const progression = ((currentTour - 1) * ARRETS_BOUCLE.length + currentArret) / (NOMBRE_TOURS * ARRETS_BOUCLE.length) * 100;
-
   if (!isDbReady) {
     return (
       <View style={[styles.container, styles.centerContent]}>
@@ -361,77 +462,64 @@ export default function App() {
 
   return (
     <>
-      <StatusBar barStyle="dark-content" />
-      <ScrollView style={styles.container}>
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
+      
+      <ScrollView style={dynamicStyles.container}>
+        
+        
         <View style={styles.header}>
-          <Text style={styles.title}>VLX COMPTAGES</Text>
-          <Text style={styles.subtitle}>Denain - Espace Villars</Text>
-          {totalComptages > 0 && (
-            <Text style={styles.badge}>{totalComptages} comptages</Text>
-          )}
+          <Text style={[styles.title, dynamicStyles.text]}>VLX COMPTAGES</Text>
+          <Text style={[styles.subtitle, dynamicStyles.textSecondary]}>Denain - Espace Villars</Text>
         </View>
 
-        <View style={styles.infoBox}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoText}>🔄 Tour {currentTour}/{NOMBRE_TOURS}</Text>
-            <Text style={styles.infoText}>📍 Arrêt {currentArret + 1}/{ARRETS_BOUCLE.length}</Text>
-          </View>
+        <View style={dynamicStyles.infoBox}>
+          <Text style={dynamicStyles.text}>Tour {currentTour}/{NOMBRE_TOURS}</Text>
+          <Text style={dynamicStyles.text}>Arrêt {currentArret + 1}/{infosTour.arrets.length}</Text>
           <View style={styles.progressBar}>
             <View style={[styles.progressFill, { width: `${progression}%` }]} />
           </View>
-          <Text style={styles.progressText}>{progression.toFixed(1)}% complété</Text>
+          <Text style={[styles.progressText, dynamicStyles.textSecondary]}>{progression.toFixed(1)}%</Text>
         </View>
 
-        <View style={styles.arretBox}>
-          <Text style={styles.arretLabel}>ARRÊT ACTUEL</Text>
-          <Text style={styles.arretNom}>{ARRETS_BOUCLE[currentArret]}</Text>
-          <View style={styles.arretInfo}>
-            <Text style={styles.arretTour}>Tour {currentTour}</Text>
-            <Text style={styles.arretPosition}>#{currentArret + 1}</Text>
-          </View>
+        <View style={dynamicStyles.horairesBox}>
+          <Text style={[styles.horaireText, dynamicStyles.text]}>🕒 Départ tour : {infosTour.HD} ({infosTour.depart})</Text>
+          <Text style={[styles.horaireText, dynamicStyles.text]}>🕓 Arrivée tour : {infosTour.HA} ({infosTour.arrivee})</Text>
         </View>
 
-        <View style={styles.compteurSection}>
-          <Text style={styles.sectionTitle}>MONTER</Text>
+        <View style={dynamicStyles.arretBox}>
+          <Text style={[styles.arretLabel, dynamicStyles.text]}>ARRÊT ACTUEL</Text>
+          <Text style={[styles.arretNom, dynamicStyles.text]}>{infosTour.arrets[currentArret]}</Text>
+        </View>
+
+        <View style={dynamicStyles.compteurSection}>
+          <Text style={[styles.sectionTitle, dynamicStyles.text]}>MONTER</Text>
           <View style={styles.counterRow}>
-            <TouchableOpacity
-              style={styles.btnCounter}
-              onPress={() => setMontees(Math.max(0, montees - 1))}
-            >
+            <TouchableOpacity style={styles.btnCounter} onPress={() => setMontees(Math.max(0, montees - 1))}>
               <Text style={styles.btnCounterText}>−</Text>
             </TouchableOpacity>
             <TextInput
               style={styles.counterInput}
               value={montees.toString()}
-              onChangeText={(v) => setMontees(Math.max(0, parseInt(v) || 0))}
+              onChangeText={v => setMontees(Math.max(0, parseInt(v) || 0))}
               keyboardType="numeric"
             />
-            <TouchableOpacity
-              style={styles.btnCounter}
-              onPress={() => setMontees(montees + 1)}
-            >
+            <TouchableOpacity style={styles.btnCounter} onPress={() => setMontees(montees + 1)}>
               <Text style={styles.btnCounterText}>+</Text>
             </TouchableOpacity>
           </View>
 
-          <Text style={[styles.sectionTitle, { marginTop: 25 }]}>DESCENTE</Text>
+          <Text style={[styles.sectionTitle, { marginTop: 25 }, dynamicStyles.text]}>DESCENTE</Text>
           <View style={styles.counterRow}>
-            <TouchableOpacity
-              style={styles.btnCounter}
-              onPress={() => setDescentes(Math.max(0, descentes - 1))}
-            >
+            <TouchableOpacity style={styles.btnCounter} onPress={() => setDescentes(Math.max(0, descentes - 1))}>
               <Text style={styles.btnCounterText}>−</Text>
             </TouchableOpacity>
             <TextInput
               style={styles.counterInput}
               value={descentes.toString()}
-              onChangeText={(v) => setDescentes(Math.max(0, parseInt(v) || 0))}
+              onChangeText={v => setDescentes(Math.max(0, parseInt(v) || 0))}
               keyboardType="numeric"
             />
-            <TouchableOpacity
-              style={styles.btnCounter}
-              onPress={() => setDescentes(descentes + 1)}
-            >
+            <TouchableOpacity style={styles.btnCounter} onPress={() => setDescentes(descentes + 1)}>
               <Text style={styles.btnCounterText}>+</Text>
             </TouchableOpacity>
           </View>
@@ -441,88 +529,61 @@ export default function App() {
           <TouchableOpacity
             style={[styles.btnNav, (currentArret === 0 && currentTour === 1) && styles.btnNavDisabled]}
             onPress={allerArretPrecedent}
-            disabled={currentArret === 0 && currentTour === 1}
-          >
+            disabled={currentArret === 0 && currentTour === 1}>
             <Text style={styles.btnNavText}>← Précédent</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.btnNav} onPress={allerArretSuivant}>
             <Text style={styles.btnNavText}>Suivant →</Text>
           </TouchableOpacity>
         </View>
+        <TouchableOpacity style={styles.btnExportSecondary} onPress={toggleDarkMode}>
+          <Text style={styles.btnExportSecondaryText}>🌓 Mode Sombre</Text>
+        </TouchableOpacity>
 
         <View style={styles.exportSection}>
-          <Text style={styles.exportTitle}>📤 EXPORTER</Text>
-          
           <TouchableOpacity style={styles.btnExport} onPress={exporterBaseDeDonnees}>
-            <Text style={styles.btnExportText}>💾 SQLite Database</Text>
-            <Text style={styles.btnExportDesc}>.db (recommandé)</Text>
+            <Text style={styles.btnExportText}>💾 Export SQLite</Text>
           </TouchableOpacity>
-
           <TouchableOpacity style={styles.btnExportSecondary} onPress={exporterJSON}>
-            <Text style={styles.btnExportSecondaryText}>📄 JSON</Text>
+            <Text style={styles.btnExportSecondaryText}>📄 Export JSON</Text>
           </TouchableOpacity>
-
           <TouchableOpacity style={styles.btnExportSecondary} onPress={exporterCSV}>
-            <Text style={styles.btnExportSecondaryText}>📊 CSV (Excel)</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.btnReset} onPress={reinitialiserComptages}>
-            <Text style={styles.btnResetText}>🗑️ Réinitialiser</Text>
+            <Text style={styles.btnExportSecondaryText}>📊 Export CSV</Text>
           </TouchableOpacity>
         </View>
-
-        <View style={{ height: 40 }} />
       </ScrollView>
     </>
   );
 }
 
 // ==========================================
-// STYLES - COMPLET ET DEBUGGÉ
+// STYLES
 // ==========================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   centerContent: { justifyContent: 'center', alignItems: 'center' },
   loadingText: { fontSize: 18, color: '#666' },
-  
-  header: { marginTop: 40, marginBottom: 20, paddingHorizontal: 20, alignItems: 'center' },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#2196F3' },
-  subtitle: { fontSize: 14, color: '#666', marginTop: 5 },
-  badge: { marginTop: 10, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#E3F2FD', borderRadius: 20, fontSize: 12, color: '#2196F3', fontWeight: '600' },
-
-  infoBox: { backgroundColor: '#fff', marginHorizontal: 15, padding: 15, borderRadius: 12, marginBottom: 15, elevation: 3 },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  infoText: { fontSize: 15, color: '#333', fontWeight: '600' },
-  progressBar: { height: 12, backgroundColor: '#E0E0E0', borderRadius: 6, marginTop: 10, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: '#4CAF50', borderRadius: 6 },
-  progressText: { fontSize: 12, color: '#666', marginTop: 8, textAlign: 'center' },
-
-  arretBox: { backgroundColor: '#4CAF50', marginHorizontal: 15, padding: 25, borderRadius: 12, marginBottom: 20, alignItems: 'center', elevation: 5 },
-  arretLabel: { fontSize: 12, color: '#E8F5E9', fontWeight: 'bold' },
-  arretNom: { fontSize: 26, fontWeight: 'bold', color: '#fff', marginTop: 10, textAlign: 'center' },
-  arretInfo: { flexDirection: 'row', marginTop: 10, gap: 20 },
-  arretTour: { fontSize: 16, color: '#E8F5E9', fontWeight: '600' },
-  arretPosition: { fontSize: 16, color: '#E8F5E9', fontWeight: '600' },
-
-  compteurSection: { backgroundColor: '#fff', marginHorizontal: 15, padding: 20, borderRadius: 12, marginBottom: 20, elevation: 3 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#2196F3', textAlign: 'center', marginBottom: 15 },
+  header: { marginTop: 40, marginBottom: 20, alignItems: 'center' },
+  title: { fontSize: 30, fontWeight: 'bold', color: '#2196F3' },
+  subtitle: { fontSize: 14, color: '#555' },
+  progressBar: { height: 10, backgroundColor: '#ddd', borderRadius: 5, marginTop: 10 },
+  progressFill: { height: '100%', backgroundColor: '#4CAF50', borderRadius: 5 },
+  progressText: { textAlign: 'center', color: '#666', marginTop: 5 },
+  horaireText: { fontSize: 16, textAlign: 'center', marginVertical: 2 },
+  arretLabel: { color: '#E8F5E9', fontSize: 12, fontWeight: 'bold' },
+  arretNom: { color: '#fff', fontSize: 26, fontWeight: 'bold', marginTop: 8 },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#2196F3', textAlign: 'center' },
   counterRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  btnCounter: { width: 60, height: 60, backgroundColor: '#2196F3', borderRadius: 30, justifyContent: 'center', alignItems: 'center', elevation: 4 },
-  btnCounterText: { fontSize: 32, color: '#fff', fontWeight: 'bold' },
-  counterInput: { width: 100, height: 60, borderWidth: 2, borderColor: '#2196F3', textAlign: 'center', fontSize: 28, fontWeight: 'bold', marginHorizontal: 15, borderRadius: 10, backgroundColor: '#fff' },
-
-  navRow: { flexDirection: 'row', marginHorizontal: 15, marginBottom: 20, gap: 10 },
-  btnNav: { flex: 1, backgroundColor: '#FF9800', padding: 16, borderRadius: 10, elevation: 3 },
+  btnCounter: { width: 60, height: 60, borderRadius: 30, backgroundColor: '#2196F3', justifyContent: 'center', alignItems: 'center' },
+  btnCounterText: { color: '#fff', fontSize: 30, fontWeight: 'bold' },
+  counterInput: { width: 100, height: 60, borderWidth: 2, borderColor: '#2196F3', borderRadius: 8, textAlign: 'center', fontSize: 24, marginHorizontal: 10 },
+  navRow: { flexDirection: 'row', justifyContent: 'space-between', margin: 15 },
+  btnNav: { flex: 1, backgroundColor: '#FF9800', padding: 15, marginHorizontal: 5, borderRadius: 10 },
   btnNavDisabled: { backgroundColor: '#BDBDBD' },
-  btnNavText: { textAlign: 'center', fontSize: 16, fontWeight: 'bold', color: '#fff' },
-
-  exportSection: { marginHorizontal: 15, marginBottom: 20 },
-  exportTitle: { fontSize: 16, fontWeight: 'bold', color: '#666', marginBottom: 15, textAlign: 'center' },
-  btnExport: { backgroundColor: '#4CAF50', padding: 18, borderRadius: 10, marginBottom: 10, elevation: 4 },
-  btnExportText: { textAlign: 'center', fontSize: 16, fontWeight: 'bold', color: '#fff' },
-  btnExportDesc: { textAlign: 'center', fontSize: 12, color: '#E8F5E9', marginTop: 4 },
-  btnExportSecondary: { backgroundColor: '#2196F3', padding: 14, borderRadius: 10, marginBottom: 10, elevation: 2 },
-  btnExportSecondaryText: { textAlign: 'center', fontSize: 14, fontWeight: 'bold', color: '#fff' },
-  btnReset: { backgroundColor: '#f44336', padding: 14, borderRadius: 10, marginTop: 10, elevation: 2 },
-  btnResetText: { textAlign: 'center', fontSize: 14, fontWeight: 'bold', color: '#fff' }
+  btnNavText: { color: '#fff', fontWeight: 'bold', textAlign: 'center' },
+  exportSection: { margin: 15 },
+  btnExport: { backgroundColor: '#2196F3', padding: 15, borderRadius: 10, marginVertical: 5 },
+  btnExportText: { color: '#fff', textAlign: 'center', fontWeight: 'bold' },
+  btnExportSecondary: { backgroundColor: '#E0E0E0', padding: 15, borderRadius: 10, marginVertical: 5 },
+  btnExportSecondaryText: { color: '#fffcfcff', textAlign: 'center', fontWeight: 'bold' },
 });
