@@ -34,16 +34,16 @@ const exporterBaseDeDonnees = async () => {
     const dbPath = `${FileSystem.documentDirectory}SQLite/${DB_NAME}`;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
     const exportPath = `${FileSystem.cacheDirectory}comptages_${timestamp}.db`;
-    
+
     // Vérifier si le fichier existe
     const fileInfo = await FileSystem.getInfoAsync(dbPath);
     if (!fileInfo.exists) {
       Alert.alert('Erreur', 'Fichier base de données introuvable');
       return;
     }
-    
+
     await FileSystem.copyAsync({ from: dbPath, to: exportPath });
-    
+
     if (await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(exportPath, {
         mimeType: 'application/x-sqlite3',
@@ -62,7 +62,7 @@ const exporterBaseDeDonnees = async () => {
 const exporterJSON = async () => {
   try {
     let data: any[] = [];
-    
+
     // Collecter les données
     if (Platform.OS === 'web') {
       data = Array.from(memDB.entries()).map(([key, value]) => ({
@@ -77,7 +77,7 @@ const exporterJSON = async () => {
       try {
         const st = db.prepareSync('SELECT * FROM comptages ORDER BY tour, arretIndex');
         const res = st.executeSync();
-        data = res.getAllSync();
+        data = res.getAllSync(); // Récupérer le premier résultat
         st.finalizeSync();
       } catch (dbError) {
         console.warn('Erreur SQLite, utilisation données mémoire:', dbError);
@@ -100,29 +100,29 @@ const exporterJSON = async () => {
         dateHeure: value.dateHeure || new Date().toISOString(),
       }));
     }
-    
+
     if (data.length === 0) {
       Alert.alert('Info', 'Aucune donnée à exporter');
       return;
     }
-    
+
     const json = {
-      meta: { 
-        export: new Date().toISOString(), 
+      meta: {
+        export: new Date().toISOString(),
         total: data.length,
-        platform: Platform.OS 
+        platform: Platform.OS
       },
       comptages: data,
     };
-    
+
     const fileName = `comptages_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)}.json`;
     const path = `${FileSystem.cacheDirectory}${fileName}`;
-    
+
     await FileSystem.writeAsStringAsync(path, JSON.stringify(json, null, 2), { encoding: 'utf8' });
-    
+
     if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(path, { 
-        mimeType: 'application/json', 
+      await Sharing.shareAsync(path, {
+        mimeType: 'application/json',
         dialogTitle: 'Exporter JSON'
       });
       Alert.alert('Succès', 'JSON exporté');
@@ -138,7 +138,7 @@ const exporterJSON = async () => {
 const exporterCSV = async () => {
   try {
     let data: any[] = [];
-    
+
     // Collecter les données
     if (Platform.OS === 'web') {
       data = Array.from(memDB.entries()).map(([key, value]) => ({
@@ -150,10 +150,10 @@ const exporterCSV = async () => {
         dateHeure: value.dateHeure || new Date().toISOString(),
       }));
     } else if (db) {
-      try {
+try {
         const st = db.prepareSync('SELECT * FROM comptages ORDER BY tour, arretIndex');
         const res = st.executeSync();
-        data = res.getAllSync();
+        data = res.getAllSync(); // Récupérer le premier résultat
         st.finalizeSync();
       } catch (dbError) {
         console.warn('Erreur SQLite, utilisation données mémoire:', dbError);
@@ -176,25 +176,25 @@ const exporterCSV = async () => {
         dateHeure: value.dateHeure || new Date().toISOString(),
       }));
     }
-    
+
     if (data.length === 0) {
       Alert.alert('Info', 'Aucune donnée à exporter');
       return;
     }
-    
+
     const csv = [
       'Tour,Arrêt,Nom Arrêt,Montées,Descentes,Date/Heure',
       ...data.map(c => `${c.tour},${c.arretIndex},"${c.arretNom}",${c.montees},${c.descentes},"${c.dateHeure}"`)
     ].join('\n');
-    
+
     const fileName = `comptages_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)}.csv`;
     const path = `${FileSystem.cacheDirectory}${fileName}`;
-    
+
     await FileSystem.writeAsStringAsync(path, csv, { encoding: 'utf8' });
-    
+
     if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(path, { 
-        mimeType: 'text/csv', 
+      await Sharing.shareAsync(path, {
+        mimeType: 'text/csv',
         dialogTitle: 'Exporter CSV'
       });
       Alert.alert('Succès', 'CSV exporté');
@@ -317,28 +317,25 @@ const initDatabase = (): boolean => {
 // Les fonctions exporterBaseDeDonnees, exporterJSON et exporterCSV
 // sont déjà définies dans la section précédente du fichier
 export default function App() {
-  // États
+  const [isDbReady, setIsDbReady] = useState(false);
   const [currentTour, setCurrentTour] = useState(1);
   const [currentArret, setCurrentArret] = useState(0);
   const [montees, setMontees] = useState(0);
   const [descentes, setDescentes] = useState(0);
-  const [isDbReady, setIsDbReady] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   useEffect(() => {
     setIsDbReady(initDatabase());
   }, []);
-  
-   // Fonction pour changer le mode sombre
+
+  // Fonction pour changer le mode sombre
   const toggleDarkMode = () => {
     setIsDarkMode((prev) => !prev);
   };
 
-  
-
   const allerArretSuivant = () => {
     const infosTour = MOCK_HORAIRES_VLX[currentTour - 1];
-    
+
     // Sauvegarder les comptages actuels
     const key = `${currentTour}-${currentArret}`;
     const comptage = {
@@ -384,18 +381,39 @@ export default function App() {
   };
 
   const allerArretPrecedent = () => {
+    let newTour = currentTour;
+    let newArret = currentArret;
+
     if (currentArret > 0) {
-      setCurrentArret(currentArret - 1);
+      newArret = currentArret - 1;
     } else if (currentTour > 1) {
-      const tourPrecedent = currentTour - 1;
-      const infosTourPrecedent = MOCK_HORAIRES_VLX[tourPrecedent - 1];
-      setCurrentTour(tourPrecedent);
-      setCurrentArret(infosTourPrecedent.arrets.length - 1);
+      newTour = currentTour - 1;
+      newArret = MOCK_HORAIRES_VLX[newTour - 1].arrets.length - 1;
     }
 
-    // Charger les données précédentes si elles existent
-    const key = `${currentTour}-${currentArret}`;
-    const data = memDB.get(key);
+    // Mise à jour de l'UI d'abord
+    setCurrentTour(newTour);
+    setCurrentArret(newArret);
+
+    // Chargement des données synchrones
+    const key = `${newTour}-${newArret}`;
+    let data;
+
+    if (Platform.OS === 'web') {
+      data = memDB.get(key);
+    } else if (db) {
+      try {
+        const st = db.prepareSync('SELECT * FROM comptages WHERE tour = ? AND arretIndex = ?');
+        const res = st.executeSync([newTour, newArret]);
+        const results = res.getAllSync();
+        data = results.length > 0 ? results[0] : null;
+        st.finalizeSync();
+      } catch (e) {
+        console.log('Aucune donnée en base pour', key);
+        data = memDB.get(key);
+      }
+    }
+
     if (data) {
       setMontees(data.montees || 0);
       setDescentes(data.descentes || 0);
@@ -404,6 +422,31 @@ export default function App() {
       setDescentes(0);
     }
   };
+
+    // Chargement initial des données pour le premier arrêt
+  useEffect(() => {
+    const key = `${currentTour}-${currentArret}`;
+    let data;
+
+    if (Platform.OS === 'web') {
+      data = memDB.get(key);
+    } else if (db) {
+      try {
+        const st = db.prepareSync('SELECT * FROM comptages WHERE tour = ? AND arretIndex = ?');
+        const res = st.executeSync([currentTour, currentArret]);
+        const results = res.getAllSync();
+        data = results.length > 0 ? results[0] : null;
+        st.finalizeSync();
+      } catch (e) {
+        data = memDB.get(key);
+      }
+    }
+
+    if (data) {
+      setMontees(data.montees || 0);
+      setDescentes(data.descentes || 0);
+    }
+  }, [currentTour, currentArret, db]); // Dépendances pour recharger quand l'arrêt change
 
   // STYLES DYNAMIQUES
   const dynamicStyles = StyleSheet.create({
@@ -463,10 +506,10 @@ export default function App() {
   return (
     <>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
-      
+
       <ScrollView style={dynamicStyles.container}>
-        
-        
+
+
         <View style={styles.header}>
           <Text style={[styles.title, dynamicStyles.text]}>VLX COMPTAGES</Text>
           <Text style={[styles.subtitle, dynamicStyles.textSecondary]}>Denain - Espace Villars</Text>
@@ -500,7 +543,17 @@ export default function App() {
             <TextInput
               style={styles.counterInput}
               value={montees.toString()}
-              onChangeText={v => setMontees(Math.max(0, parseInt(v) || 0))}
+              onChangeText={v => {
+                const newVal = Math.max(0, parseInt(v) || 0);
+                setMontees(newVal);
+
+                const key = `${currentTour}-${currentArret}`;
+                memDB.set(key, {
+                  ...memDB.get(key),
+                  montees: newVal,
+                  dateHeure: new Date().toISOString()
+                });
+              }}
               keyboardType="numeric"
             />
             <TouchableOpacity style={styles.btnCounter} onPress={() => setMontees(montees + 1)}>
@@ -536,6 +589,8 @@ export default function App() {
             <Text style={styles.btnNavText}>Suivant →</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Bouton Mode Sombre discret */}
         <TouchableOpacity style={styles.btnExportSecondary} onPress={toggleDarkMode}>
           <Text style={styles.btnExportSecondaryText}>🌓 Mode Sombre</Text>
         </TouchableOpacity>
@@ -585,5 +640,5 @@ const styles = StyleSheet.create({
   btnExport: { backgroundColor: '#2196F3', padding: 15, borderRadius: 10, marginVertical: 5 },
   btnExportText: { color: '#fff', textAlign: 'center', fontWeight: 'bold' },
   btnExportSecondary: { backgroundColor: '#E0E0E0', padding: 15, borderRadius: 10, marginVertical: 5 },
-  btnExportSecondaryText: { color: '#fffcfcff', textAlign: 'center', fontWeight: 'bold' },
+  btnExportSecondaryText: { color: '#333', textAlign: 'center', fontWeight: 'bold' },
 });
